@@ -1129,7 +1129,7 @@ const SETTING_TREE = [
     { key:'go_to_led_screen_after_wakeup', title:'唤醒后进入LED界面', ui:'switch', hidden:{key:'wakeup_on_double_tap', eq:false} },
   ]}
 ]},
-{ title:'风扇设置', children:[
+{ title:'风扇', children:[
     { key:'fun_enable', title:'启用', ui:'switch' },
     { key:'fun_max', title:'最大风量', ui:'spinbox', min:10, max:100, step:1, unit:'%', hidden:{key:'fun_enable', eq:false} },
     { key:'fun_mos_temp_interval', title:'MOS温区', ui:'range', min:40, max:80, unit:'度', hidden:{key:'fun_enable', eq:false} },
@@ -1138,7 +1138,7 @@ const SETTING_TREE = [
     { key:'fun_stop_when_charger_full', title:'充满关闭风扇', ui:'switch', hidden:{key:'fun_enable', eq:false} },
     { key:'fun_stop_wait_time', title:'关闭等待时间', ui:'spinbox', min:0, max:120, step:1, unit:'S', hidden:{key:'fun_enable', eq:false} },
   ]},
-{ title:'充电设置', children:[
+{ title:'充电', children:[
     { key:'temp_control_input_power_default_power', title:'功率上限', ui:'spinbox', min:10, max:100, step:1, unit:'W' },
     { key:'temp_control_input_power_default_current', title:'电流上限', ui:'spinbox', min:200, max:20000, step:200, unit:'mA' },
     { key:'temp_control_input_power_bat_ot_max_temp', title:'电池过热', ui:'spinbox', min:45, max:60, step:1, unit:'度' },
@@ -1154,7 +1154,7 @@ const SETTING_TREE = [
     { key:'sw6306_charger_voltage', title:'充电电压', ui:'spinbox', min:8300, max:9000, step:10, unit:'mV' },
     { key:'charger_voltage_add', title:'电压提升', ui:'roller', options:['1A/10mV','1.2A/10mV','1.4A/10mV','1.6A/10mV','1.8A/10mV','2A/10mV'] },
   ]},
-{ title:'放电设置', children:[
+{ title:'放电', children:[
     { key:'temp_control_output_power_default_power', title:'功率上限', ui:'spinbox', min:10, max:120, step:1, unit:'W' },
     { key:'temp_control_output_power_bat_ot_temp', title:'电池过温', ui:'spinbox', min:20, max:55, step:1, unit:'度' },
     { key:'temp_control_output_power_bat_ot_power', title:'电池过温限功', ui:'spinbox', min:10, max:120, step:1, unit:'W' },
@@ -1246,14 +1246,14 @@ const SETTING_TREE = [
     ]},
     { title:'PPS电流修改', hidden:{key:'sw6306_pd_en', eq:false}, children:[
       { key:'sw6306_pd_pps_en', title:'允许修改', ui:'switch' },
-      { key:'sw6306_pd_pps0_en', title:'PPS0档位', ui:'switch', hidden:{key:'sw6306_pd_pps_en', eq:false} },
-      { key:'sw6306_pd_pps1_en', title:'PPS1档位', ui:'switch', hidden:{key:'sw6306_pd_pps_en', eq:false} },
-      { key:'sw6306_pd_pps2_en', title:'PPS2档位', ui:'switch', hidden:{key:'sw6306_pd_pps_en', eq:false} },
-      { key:'sw6306_pd_pps3_en', title:'PPS3档位', ui:'switch', hidden:{key:'sw6306_pd_pps_en', eq:false} },
-      { key:'sw6306_pd_pps0_ma', title:'PPS0电流', ui:'spinbox', min:500, max:5000, step:50, unit:'mA', hidden:{key:'sw6306_pd_pps_en', eq:false} },
-      { key:'sw6306_pd_pps1_ma', title:'PPS1电流', ui:'spinbox', min:500, max:5000, step:50, unit:'mA', hidden:{key:'sw6306_pd_pps_en', eq:false} },
-      { key:'sw6306_pd_pps2_ma', title:'PPS2电流', ui:'spinbox', min:500, max:5000, step:50, unit:'mA', hidden:{key:'sw6306_pd_pps_en', eq:false} },
-      { key:'sw6306_pd_pps3_ma', title:'PPS3电流', ui:'spinbox', min:500, max:5000, step:50, unit:'mA', hidden:{key:'sw6306_pd_pps_en', eq:false} },
+      { key:'sw6306_pd_pps0_en', title:'PPS 5-5.9V', ui:'switch', hidden:{key:'sw6306_pd_pps_en', eq:false} },
+      { key:'sw6306_pd_pps1_en', title:'PPS 5-11V', ui:'switch', hidden:{key:'sw6306_pd_pps_en', eq:false} },
+      { key:'sw6306_pd_pps2_en', title:'PPS 5-16V', ui:'switch', hidden:{key:'sw6306_pd_pps_en', eq:false} },
+      { key:'sw6306_pd_pps3_en', title:'PPS 5-21V', ui:'switch', hidden:{key:'sw6306_pd_pps_en', eq:false} },
+      { key:'sw6306_pd_pps0_ma', title:'PPS 5-5.9V电流', ui:'spinbox', min:500, max:5000, step:50, unit:'mA', hidden:{key:'sw6306_pd_pps_en', eq:false} },
+      { key:'sw6306_pd_pps1_ma', title:'PPS 5-11V电流', ui:'spinbox', min:500, max:5000, step:50, unit:'mA', hidden:{key:'sw6306_pd_pps_en', eq:false} },
+      { key:'sw6306_pd_pps2_ma', title:'PPS 5-16V电流', ui:'spinbox', min:500, max:5000, step:50, unit:'mA', hidden:{key:'sw6306_pd_pps_en', eq:false} },
+      { key:'sw6306_pd_pps3_ma', title:'PPS 5-21V电流', ui:'spinbox', min:500, max:5000, step:50, unit:'mA', hidden:{key:'sw6306_pd_pps_en', eq:false} },
     ]},
   ]},
 ]},
@@ -1284,7 +1284,6 @@ const SETTING_TREE = [
   { title:'配置参数', children:[
     { key:'bq_taper_cur', title:'变100%平均电流', ui:'spinbox', min:1000, max:8000, step:100, unit:'mA' },
     { key:'bq_term_min_cell_v', title:'Term电压', ui:'spinbox', min:2500, max:3600, step:100, unit:'mV' },
-    { key:'bq_version', title:'版本', ui:'label' },
   ]},
 ]},
 ];
