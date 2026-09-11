@@ -104,6 +104,18 @@
   .pill.warn{color:var(--warn);border-color:rgba(255,216,74,.4)}
   .pill.warn .dot{background:var(--warn);box-shadow:0 0 8px var(--warn)}
 
+  /* ============ 兼容模式提示条(旧固件) ============ */
+  .compat-banner{
+    position:relative;z-index:40;
+    margin:10px 14px 0;
+    border:1px solid rgba(255,216,74,.45);
+    background:rgba(255,216,74,.08);
+    border-radius:var(--r);
+    padding:10px 12px;
+  }
+  .compat-banner .cb-main{font-size:12.5px;font-weight:600;color:var(--warn);letter-spacing:.02em}
+  .compat-banner .cb-sub{font-size:11px;color:var(--text-dim);margin-top:4px;line-height:1.5}
+
   .actions{display:flex;gap:8px}
   .ico-btn{
     width:36px;height:36px;border-radius:10px;
@@ -501,6 +513,12 @@
   </div>
 </header>
 
+<!-- ============ 兼容模式提示条(探测到旧固件时显示) ============ -->
+<div id="compat-banner" class="compat-banner" style="display:none">
+  <div class="cb-main">⚠ 已进入兼容模式：设备固件较旧，蓝牙升级可正常使用，保活 / 日志下载 / 部分新设置项不可用</div>
+  <div class="cb-sub">旧固件连接闲置约 30 秒会自动休眠断开，请尽快开始升级或触摸设备屏幕保持唤醒；升级完成后重新连接即恢复完整功能</div>
+</div>
+
 <!-- ============ 受限模式密码管理(logo 长按触发) ============ -->
 <div class="modal" id="pw-modal">
   <div class="modal-card">
@@ -798,6 +816,11 @@ let device=null, server=null, rxChr=null, txChr=null, otaChr=null, dlChr=null;
 let reqId=1; const pending=new Map();
 let rxBuf='';
 let connected=false;
+/* 兼容模式: null=探测中, true=旧固件(无 ping 命令, 如 260804), false=完整模式 */
+let compatMode = null;
+function setCompatBanner(on){
+  const el = $('compat-banner'); if (el) el.style.display = on ? 'block' : 'none';
+}
 
 function setConnUI(on){
   connected = on;
@@ -875,6 +898,7 @@ function onDisconnect(){
   otaBusy=false; otaRefreshUI();
   if (window.__zhp2dDl) window.__zhp2dDl.reset();
   rxBuf=''; waitingFirstTele = false; logW('设备已断开');
+  compatMode = null; setCompatBanner(false);
 }
 /* 配对完成时设备自动开始遥测推送(无需 sub tele).
    这里只等待第一个 tele 帧到来后再拉取 info/settings,
@@ -899,6 +923,18 @@ async function initAfterPair(){
       logI('下载流已启用(二进制块)');
     }
   }catch(e){ logW('下载流启用失败: '+e); dlChr=null; }
+  /* 能力探测: 旧固件(260804 代)无 ping 命令, 回 E_PATH 错误 → 兼容模式;
+     新固件回 pong → 完整模式。探测失败/超时一律按兼容处理(顺序写对新固件同样安全)。
+     兼容模式下 OTA 改顺序写、停用保活心跳(旧固件休眠无法远程阻止)。 */
+  compatMode = null; setCompatBanner(false);
+  try{
+    await call('get','ping');
+    compatMode = false;
+  }catch(e){
+    compatMode = true;
+    setCompatBanner(true);
+    logW('检测到旧固件, 已进入兼容模式: 蓝牙升级可用, 保活/日志下载/部分新设置项不可用');
+  }
   try{
     const info = await call('get','info');
     $('info-host').innerHTML = Object.entries(info).map(([k,v])=>
@@ -1039,34 +1075,64 @@ async function otaStart(){
     otaLog('SHA256: '+sha.slice(0,24)+'…', 'i');
     otaSetStatus('请求开始...', 0);
     await otaCall('start', {size: f.size, sha256: sha});
-    otaLog('设备就绪, 上传固件...', 'i');
+    otaLog('设备就绪, 上传固件...'+(compatMode ? '(兼容模式·顺序写)' : ''), 'i');
     const CHUNK = 240;
-    const WINDOW = 4096;     /* 在途未确认上限: 设备 progress 每2KB回报一次, 队列32×240≈7.5KB, 窗口填满也不会被 NACK */
-    const STALL_MS = 10000;  /* 窗口等 progress 的停滞超时(偶发丢一条通知由下一条自愈) */
-    otaFlow.acked = 0; otaFlow.lastProgAt = Date.now();
+    const kb = n => n>=1048576 ? (n/1048576).toFixed(2)+'MB' : (n/1024).toFixed(0)+'KB';
     let off = 0;
-    while (off < f.size){
-      /* 滑窗流控: 在途(off-acked)达到窗口上限就等设备回报; 传完不等待, 完整性由 apply 校验兜底 */
-      while (off - otaFlow.acked >= WINDOW){
-        if (!connected) throw new Error('连接已断开');
-        if (Date.now() - otaFlow.lastProgAt > STALL_MS)
-          throw new Error('设备无进度 ('+otaFlow.acked+'/'+f.size+' 在途@'+off+', 超过 '+(STALL_MS/1000)+'s)');
-        await new Promise(rs=>setTimeout(rs, 15));
-      }
-      const len = Math.min(CHUNK, f.size - off);
-      const slice = new Uint8Array(buf.slice(off, off+len));
-      let ok = false, lastErr = null, wait = 30;
-      for (let r=0; r<20 && !ok; r++){
-        try { await gattSerialize(async ()=>{ await otaChr.writeValue(slice); }); ok = true; }
-        catch(e){
-          if (!connected) throw new Error('连接已断开: '+(e.message||e));
-          lastErr = e;
-          await new Promise(rs=>setTimeout(rs, wait));   /* 指数退避: 30ms 起倍增, 封顶 1s */
-          wait = Math.min(wait*2, 1000);
+    if (compatMode !== false){   /* 兼容模式或探测未完成: 顺序写对新老固件都安全 */
+      /* 兼容模式(旧固件, 如 260804): 顺序写。
+         旧固件 progress 仅在整百分比变化时回报(≈15KB/次), 滑窗(4KB)会永久等不到
+         放行通知而停滞超时; 这里以写入响应为天然背压逐块推进, 不依赖 progress 节奏,
+         与正式页已验证的传输方式一致(重试加强为指数退避)。
+         进度条按本地已发送字节数刷新, 不依赖设备回报。 */
+      let lastUi = 0;
+      while (off < f.size){
+        const len = Math.min(CHUNK, f.size - off);
+        const slice = new Uint8Array(buf.slice(off, off+len));
+        let ok = false, lastErr = null, wait = 30;
+        for (let r=0; r<20 && !ok; r++){
+          try { await gattSerialize(async ()=>{ await otaChr.writeValue(slice); }); ok = true; }
+          catch(e){
+            if (!connected) throw new Error('连接已断开: '+(e.message||e));
+            lastErr = e;
+            await new Promise(rs=>setTimeout(rs, wait));   /* 指数退避: 30ms 起倍增, 封顶 1s */
+            wait = Math.min(wait*2, 1000);
+          }
+        }
+        if (!ok) throw new Error('chunk @'+off+' 写入失败: '+(lastErr && lastErr.message || lastErr));
+        off += len;
+        if (off - lastUi >= 4096 || off === f.size){
+          lastUi = off;
+          otaSetStatus('上传中 '+kb(off)+' / '+kb(f.size), off*100/f.size);
         }
       }
-      if (!ok) throw new Error('chunk @'+off+' 写入失败: '+(lastErr && lastErr.message || lastErr));
-      off += len;
+    } else {
+      /* 滑窗流控(新固件): 在途(off-acked)达到窗口上限就等设备回报; 传完不等待, 完整性由 apply 校验兜底 */
+      const WINDOW = 4096;     /* 在途未确认上限: 设备 progress 每2KB回报一次, 队列32×240≈7.5KB, 窗口填满也不会被 NACK */
+      const STALL_MS = 10000;  /* 窗口等 progress 的停滞超时(偶发丢一条通知由下一条自愈) */
+      otaFlow.acked = 0; otaFlow.lastProgAt = Date.now();
+      while (off < f.size){
+        while (off - otaFlow.acked >= WINDOW){
+          if (!connected) throw new Error('连接已断开');
+          if (Date.now() - otaFlow.lastProgAt > STALL_MS)
+            throw new Error('设备无进度 ('+otaFlow.acked+'/'+f.size+' 在途@'+off+', 超过 '+(STALL_MS/1000)+'s)');
+          await new Promise(rs=>setTimeout(rs, 15));
+        }
+        const len = Math.min(CHUNK, f.size - off);
+        const slice = new Uint8Array(buf.slice(off, off+len));
+        let ok = false, lastErr = null, wait = 30;
+        for (let r=0; r<20 && !ok; r++){
+          try { await gattSerialize(async ()=>{ await otaChr.writeValue(slice); }); ok = true; }
+          catch(e){
+            if (!connected) throw new Error('连接已断开: '+(e.message||e));
+            lastErr = e;
+            await new Promise(rs=>setTimeout(rs, wait));   /* 指数退避: 30ms 起倍增, 封顶 1s */
+            wait = Math.min(wait*2, 1000);
+          }
+        }
+        if (!ok) throw new Error('chunk @'+off+' 写入失败: '+(lastErr && lastErr.message || lastErr));
+        off += len;
+      }
     }
     otaSetStatus('上传完成, 校验并应用...', 100);
     otaLog('上传完成 ('+f.size+' 字节), 发送 apply...', 'i');
@@ -1723,9 +1789,10 @@ function stopSetTicker(){
 /* 页面可见且已连接时每 1s 发一次心跳(get ping): 设备端 web 命令到达即刷新
    休眠保活窗口, 防止挂机时被自动休眠掐断 BLE 链路(睡眠延迟默认 30s)。
    页面切到后台(document.hidden)即停发, 设备按睡眠延迟正常休眠, 回到前台需重连;
-   OTA 期间跳过(设备已有传输保活标志, 且上传高频占用链路); 心跳静默不写日志。 */
+   OTA 期间跳过(设备已有传输保活标志, 且上传高频占用链路); 心跳静默不写日志。
+   兼容模式(compatMode=true, 旧固件无 ping 命令)与探测期间(null)一律跳过。 */
 function heartbeatTick(){
-  if (!connected || document.hidden || otaBusy) return;
+  if (!connected || document.hidden || otaBusy || compatMode !== false) return;
   call('get','ping').catch(()=>{});
 }
 setInterval(heartbeatTick, 1000);
@@ -1786,9 +1853,30 @@ $('btn-clear-log').onclick = ()=>{ $('log').innerHTML=''; };
 $('btn-connect').onclick = ()=> connectBLE();
 
 /* OTA */
+/* 文件选择即校验: 后缀必须 .bin(accept 只是提示可被绕过), 大小需小于 3600KB;
+   不满足则拒绝该文件并在文件名行/OTA日志给出提示, 清空 input 以便重选同名文件仍触发 change */
 $('ota-file').onchange = (e)=>{
-  otaState.file = e.target.files[0]||null;
-  $('ota-filename').textContent = otaState.file ? (otaState.file.name+' · '+(otaState.file.size/1024).toFixed(1)+' KB') : '';
+  const f = e.target.files[0]||null, input = e.target;
+  const showName = (msg, err)=>{
+    const el = $('ota-filename');
+    el.style.color = err ? 'var(--err)' : 'var(--text-fade)';
+    el.textContent = msg;
+  };
+  const fail = (msg)=>{
+    otaState.file = null; input.value = '';
+    showName(msg, true);
+    otaSetStatus('文件未通过校验', 0);
+    otaLog('✗ '+msg, 'e'); logW(msg);
+    otaRefreshUI();
+  };
+  if (f){
+    if (!/\.bin$/i.test(f.name)) return fail('「'+f.name+'」后缀必须是 .bin');
+    if (f.size >= 3600*1024) return fail('「'+f.name+'」大小 '+(f.size/1024).toFixed(1)+'KB，超出上限（需小于 3600KB）');
+  }
+  otaState.file = f;
+  showName(f ? (f.name+' · '+(f.size/1024).toFixed(1)+' KB') : '', false);
+  /* 清除上次校验失败残留的状态提示(上传进行中则不动) */
+  if (!otaBusy && $('ota-status').textContent === '文件未通过校验') otaSetStatus('待机', 0);
   otaRefreshUI();
 };
 $('btn-ota-start').onclick = otaStart;
